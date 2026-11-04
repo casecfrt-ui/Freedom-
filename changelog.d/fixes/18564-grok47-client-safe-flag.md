@@ -1,0 +1,1 @@
+- **test(cursor):** Guard Grok 4.7's client-safe flag import and verify that the server bridge and open-sse helper share the same resolver, including fail-closed and environment fallback behavior ([#18564](https://github.com/cheaper-inference/OmniRoute/pull/18564)).

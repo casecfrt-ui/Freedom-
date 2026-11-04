@@ -106,6 +106,7 @@ type PreludeBaseOptionArgs = {
 /** Rebuild handleComboChat's option bag verbatim for a recursive dispatch. */
 function buildBaseOptions(a: PreludeBaseOptionArgs): HandleComboChatOptions {
   return {
+    sourceFormat: a.sourceFormat,
     body: a.body,
     combo: a.combo,
     handleSingleModel: a.handleSingleModel,
@@ -122,7 +123,6 @@ function buildBaseOptions(a: PreludeBaseOptionArgs): HandleComboChatOptions {
     perTargetAdmission: a.perTargetAdmission,
     deferContextOverflowWhenCompressible: a.deferContextOverflowWhenCompressible,
     compressionExclusions: a.compressionExclusions,
-    sourceFormat: a.sourceFormat,
     endpointPath: a.endpointPath,
     requestHeaders: a.requestHeaders,
   };

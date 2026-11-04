@@ -98,6 +98,7 @@ export function detectCachingContext(
     inferProviderFromModel(context.model) ??
     inferProviderFromModel(bodyRecord.model);
   const targetFormat = normalizeString(context.targetFormat)?.toLowerCase() ?? null;
+  const resolvedModel = context.model ?? normalizeString(bodyRecord.model);
   const isAntigravityTarget = provider === "antigravity" || provider === "agy";
   const geminiPromptCacheMode = context.geminiPromptCacheMode === "implicit" ? "implicit" : "off";
 
@@ -112,11 +113,12 @@ export function detectCachingContext(
             provider,
             targetFormat,
             context.connectionCacheOverride,
-            context.model
+            resolvedModel
           ),
     usesAutomaticPrefixCaching: providerUsesAutomaticPrefixCaching(
       provider,
-      context.connectionCacheOverride
+      context.connectionCacheOverride,
+      resolvedModel
     ),
   };
 }
@@ -128,6 +130,25 @@ export function detectCachingContext(
  * @param ctx - The caching context
  * @returns A CacheAwareStrategy object
  */
+/**
+ * OpenCode's upstream automatic-prefix cache and retroactive history compression
+ * cannot safely run together: stacked lite/session-dedup steps may rewrite
+ * previously sent tool results, invalidating the prefix on the next turn.
+ * The chatCore live-zone path uses this signal to preserve cold prefixes verbatim
+ * and reuse them on subsequent turns while still processing new tool outputs.
+ * Explicit per-connection cache overrides remain authoritative.
+ */
+export function mustKeepOpenCodeHistoryVerbatim(
+  body: unknown,
+  context: CachingDetectionContext = {}
+): boolean {
+  const caching = detectCachingContext(body, context);
+  return (
+    caching.usesAutomaticPrefixCaching &&
+    (caching.provider === "opencode" || caching.provider === "opencode-go")
+  );
+}
+
 export function getCacheAwareStrategy(strategy: string, ctx: CachingContext): CacheAwareStrategy {
   // #3955: a caching provider is enough on its own to protect the cacheable prefix.
   // OpenAI / Codex (and other automatic-prefix-cache providers) carry NO explicit

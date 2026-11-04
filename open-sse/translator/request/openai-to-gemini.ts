@@ -107,6 +107,81 @@ type GeminiRequest = {
   _toolNameMap?: Map<string, string>;
 };
 
+type GeminiThinkingLevel = "minimal" | "low" | "medium" | "high";
+type ResolvedGeminiThinking = { level: GeminiThinkingLevel; includeThoughts: boolean };
+
+const GEMINI_NATIVE_EFFORT_LEVELS: ReadonlyMap<string, GeminiThinkingLevel> = new Map<string, GeminiThinkingLevel>([
+  ["none", "minimal"],
+  ["minimal", "minimal"],
+  ["low", "low"],
+  ["medium", "medium"],
+  ["high", "high"],
+  ["xhigh", "high"],
+  ["max", "high"],
+  ["auto", "high"],
+]);
+
+function nativeGeminiEffort(
+  rawEffort: unknown,
+  supported: readonly GeminiThinkingLevel[]
+): ResolvedGeminiThinking | null {
+  if (typeof rawEffort !== "string") return null;
+  const effort = rawEffort.trim().toLowerCase();
+  const mapped = GEMINI_NATIVE_EFFORT_LEVELS.get(effort);
+  if (!mapped || !supported.includes(mapped)) return null;
+  return { level: mapped, includeThoughts: effort !== "none" };
+}
+
+function nativeGeminiBudget(
+  rawBudget: unknown,
+  supported: readonly GeminiThinkingLevel[]
+): ResolvedGeminiThinking | null {
+  if (typeof rawBudget !== "number" || !Number.isFinite(rawBudget)) return null;
+  const level: GeminiThinkingLevel =
+    rawBudget <= 0 ? "minimal" : rawBudget <= 1024 ? "low" : rawBudget <= 8192 ? "medium" : "high";
+  if (!supported.includes(level)) return null;
+  return { level, includeThoughts: rawBudget > 0 };
+}
+
+function resolveNativeGeminiThinkingLevel(
+  model: string,
+  body: Record<string, unknown>,
+  explicitThinkingLevel: GeminiThinkingLevel | null
+): ResolvedGeminiThinking | null {
+  const spec = getModelSpec(model);
+  const supported = spec?.geminiThinkingLevels;
+  if (!supported?.length) return null;
+  // The operator's explicit Gemini 3 thinkingLevel takes precedence over
+  // a translated OpenAI effort or the model default.
+  if (explicitThinkingLevel && supported.includes(explicitThinkingLevel)) {
+    return { level: explicitThinkingLevel, includeThoughts: true };
+  }
+
+  const reasoning =
+    body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning)
+      ? (body.reasoning as Record<string, unknown>)
+      : {};
+  const fromEffort = nativeGeminiEffort(body.reasoning_effort ?? reasoning.effort, supported);
+  if (fromEffort) return fromEffort;
+
+  const thinking =
+    body.thinking && typeof body.thinking === "object" && !Array.isArray(body.thinking)
+      ? (body.thinking as Record<string, unknown>)
+      : {};
+  if (body.thinking === false || thinking.type === "disabled") {
+    const level = supported.includes("minimal") ? "minimal" : spec?.defaultGeminiThinkingLevel;
+    return level && supported.includes(level) ? { level, includeThoughts: false } : null;
+  }
+  const fromBudget = nativeGeminiBudget(thinking.budget_tokens ?? thinking.budgetTokens, supported);
+  if (fromBudget) return fromBudget;
+
+  const level =
+    spec?.defaultGeminiThinkingLevel && supported.includes(spec.defaultGeminiThinkingLevel)
+      ? spec.defaultGeminiThinkingLevel
+      : supported[0];
+  return level ? { level, includeThoughts: true } : null;
+}
+
 // Convert OpenAI tool_choice into Gemini's functionCallingConfig mode. Mirrors
 // convertOpenAIToolChoice in openai-to-claude.ts (same enum shapes from the client).
 // Gemini's modes: AUTO (model decides), ANY (must call a function — OpenAI's
@@ -187,7 +262,7 @@ type GeminiToolNameOptions = {
 // Returns the trimmed non-empty level, or null when no level was supplied — an
 // empty/whitespace string is treated as "no level" so it can never disagree
 // with the extraction that later writes the field onto the request.
-function extractExplicitThinkingLevel(body: Record<string, unknown>): string | null {
+function extractExplicitThinkingLevel(body: Record<string, unknown>): GeminiThinkingLevel | null {
   const gc = body.generationConfig as Record<string, unknown> | undefined;
   const tc = gc?.thinkingConfig as Record<string, unknown> | undefined;
   const tcSnake = gc?.thinking_config as Record<string, unknown> | undefined;
@@ -198,7 +273,11 @@ function extractExplicitThinkingLevel(body: Record<string, unknown>): string | n
     body.thinking_level,
   ];
   for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim() !== "") return candidate.trim();
+    if (typeof candidate !== "string") continue;
+    const level = candidate.trim().toLowerCase();
+    if (level === "minimal" || level === "low" || level === "medium" || level === "high") {
+      return level;
+    }
   }
   return null;
 }
@@ -274,10 +353,18 @@ function openaiToGeminiBase(
   // Mirrors the same guard in claude-to-gemini.ts. Port of the thinkingConfig
   // guard half of decolua/9router#2480 (the signature-replay half of that PR
   // is out of scope and not ported here).
-  // Models without thinking support (TTS, transcription, gemini-2.5-flash-image)
-  // 400 on ANY thinkingConfig, so every path below skips them (#16928).
+  // Do not attach thinkingConfig to image, TTS or transcription models:
+  // they reject the entire field, including a native thinkingLevel.
   const rejectsThinkingConfig = geminiModelRejectsThinkingConfig(model);
-  if (model.startsWith("gemma-4") || rejectsThinkingConfig) {
+  const nativeThinkingLevel = rejectsThinkingConfig
+    ? null
+    : resolveNativeGeminiThinkingLevel(model, body, explicitThinkingLevel);
+  if (nativeThinkingLevel !== null) {
+    result.generationConfig.thinkingConfig = {
+      thinkingLevel: nativeThinkingLevel.level,
+      includeThoughts: nativeThinkingLevel.includeThoughts,
+    };
+  } else if (model.startsWith("gemma-4") || rejectsThinkingConfig) {
     // gemma-4 models returns - 400: Thinking budget is not supported for this model
   } else {
     // 1. OpenAI format: reasoning_effort (none/low/medium/high/auto/max/xhigh)

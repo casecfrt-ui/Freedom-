@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { declaredInputModalities } from "./inputModalities";
 import {
   getSyncedAvailableModelsForConnection,
   replaceSyncedAvailableModelsForConnection,
@@ -536,6 +537,7 @@ export function detectModelModality(
   };
 }
 
+/** Normalize discovered model records while retaining explicit input-modality declarations. */
 export function normalizeDiscoveredModels(
   models: unknown,
   providerId?: string
@@ -587,7 +589,8 @@ export function normalizeDiscoveredModels(
         : modality.isImage
           ? "image"
           : undefined;
-    const explicitInputTypes = Array.isArray(record.supportedInputTypes);
+    const inputModalities = declaredInputModalities(record, providerId);
+    const explicitInputTypes = inputModalities !== undefined;
 
     const supportedEndpoints = Array.isArray(record.supportedEndpoints)
       ? Array.from(
@@ -736,7 +739,7 @@ export function normalizeDiscoveredModels(
         ? { dimensions: modality.dimensions }
         : {}),
       ...((modelType || explicitInputTypes) && modality.supportedInputTypes.length > 0
-        ? { supportedInputTypes: modality.supportedInputTypes }
+        ? { supportedInputTypes: inputModalities ?? modality.supportedInputTypes }
         : {}),
       ...(modelType ? { modelType } : {}),
     });

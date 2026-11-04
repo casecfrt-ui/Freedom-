@@ -37,6 +37,9 @@
   "plugins": ["@stryker-mutator/tap-runner"],
   "tap": {
     "testFiles": [
+      "tests/unit/antigravity-argon-404.test.ts",
+      "tests/unit/combo/combo-resilience-no-provider-state.test.ts",
+      "tests/unit/singbox-routes-local-only.test.ts",
       "tests/unit/claude-model-scoped-429-headroom-18296.test.ts",
       "tests/unit/qoder-model-scoped-throttle-real-path.test.ts",
       "tests/unit/qoder-model-scoped-throttle.test.ts",

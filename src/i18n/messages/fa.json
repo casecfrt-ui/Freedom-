@@ -15930,5 +15930,28 @@
     "greetingFallbackName": "آنجا",
     "errNoReply": "⚠️ پاسخی از دروازه دریافت نشد.",
     "btnSend": "ارسال"
+  },
+  "falNative": {
+    "title": "__MISSING__:Fal native models",
+    "description": "__MISSING__:Discover an endpoint, load its schema, and run its documented inputs. Queue status and native streaming remain separate.",
+    "connectionRequired": "__MISSING__:Add a Fal API key connection first.",
+    "category": "__MISSING__:Category",
+    "endpoint": "__MISSING__:Endpoint ID",
+    "reasoning": "__MISSING__:Reasoning control",
+    "input": "__MISSING__:Native JSON input (arrays retain their order)",
+    "transport": "__MISSING__:Transport",
+    "run": "__MISSING__:Run model",
+    "job": "__MISSING__:Saved job ID",
+    "register": "__MISSING__:Register endpoint or schema override",
+    "schema": "__MISSING__:OpenAPI 3 schema",
+    "download": "__MISSING__:Download artifact",
+    "newGeneration": "تولید جدید",
+    "submissionUnknown": "SUBMISSION_UNKNOWN: ممکن است کار در بالادست هنوز در حال اجرا باشد. ابتدا رسید ارسال قبلی را بازیابی کنید.",
+    "recover": "بازیابی ارسال قبلی",
+    "recoveryRecord": "ارسال ذخیره‌شده",
+    "recoveryMismatch": "برای بازیابی پس از بارگذاری مجدد، اتصال و پیش‌نویس باید دقیقاً مطابق ارسال اصلی باشند. درخواست جدیدی ارسال نشد.",
+    "recoveryHelp": "بازیابی از ورودی و کلید اصلی استفاده می‌کند. پس از بارگذاری مجدد، نقطه پایانی، اتصال، روش انتقال و ورودی اصلی را بازگردانید. تولید جدید یک درخواست هزینه‌دار جداگانه است. حداکثر ۲۰ رسید در این زبانه نگهداری می‌شود.",
+    "streamIncomplete": "جریان بدون رویداد نهایی کامل پایان یافت. وضعیت تکمیل در بالادست نامشخص است.",
+    "streamError": "بالادست خطایی در جریان گزارش کرد. فایل‌های دریافت‌شده همچنان در دسترس هستند."
   }
 }

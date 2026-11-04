@@ -12,7 +12,9 @@
  * - Latency telemetry & prompt cache
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
+
+import { usePolling } from "@/hooks/usePolling";
 
 import { Card } from "@/shared/components";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
@@ -116,22 +118,14 @@ export default function HealthPage() {
     if (results[2].status === "fulfilled") setDegradation(results[2].value);
   }, []);
 
-  useEffect(() => {
-    const initialFetch = setTimeout(() => {
-      void fetchHealth();
-      void fetchExtras();
-      void fetchDbHealth();
-    }, 0);
-    const interval = setInterval(() => {
-      void fetchHealth();
-      void fetchExtras();
-      void fetchDbHealth();
-    }, 15000);
-    return () => {
-      clearTimeout(initialFetch);
-      clearInterval(interval);
-    };
-  }, [fetchHealth, fetchExtras, fetchDbHealth]);
+  // Initial fetch + ongoing cadence: usePolling fires its first tick
+  // immediately, so no separate mount effect is needed (a direct
+  // setState-in-effect call trips react-hooks/set-state-in-effect).
+  usePolling(() => {
+    void fetchHealth();
+    void fetchExtras();
+    void fetchDbHealth();
+  }, 15000);
 
   const handleResetHealth = async () => {
     if (!confirm(t("resetConfirm"))) return;
@@ -271,13 +265,11 @@ export default function HealthPage() {
       {/* Verdict Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">
-          {
-            data.status === "healthy"
-              ? t("healthVerdictReady")
-              : data.status === "cooling"
-                ? t("healthVerdictCoolingDown")
-                : t("healthVerdictActionRequired")
-          }
+          {data.status === "healthy"
+            ? t("healthVerdictReady")
+            : data.status === "cooling"
+              ? t("healthVerdictCoolingDown")
+              : t("healthVerdictActionRequired")}
         </h1>
         <p className="text-text-muted text-lg">{t("healthSubtitle")}</p>
       </div>
@@ -300,9 +292,7 @@ export default function HealthPage() {
           {data.status === "healthy" ? "check_circle" : "error"}
         </span>
         <span className={data.status === "healthy" ? "text-green-400" : "text-red-400"}>
-          {data.status === "healthy"
-            ? t("allOperational")
-            : t("issuesDetected")}
+          {data.status === "healthy" ? t("allOperational") : t("issuesDetected")}
         </span>
       </div>
 

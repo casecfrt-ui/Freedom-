@@ -2,6 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { usePolling } from "@/hooks/usePolling";
 import { PROVIDER_COLORS, getHttpStatusStyle } from "@/shared/constants/colors";
 import { formatTime } from "@/shared/utils/formatting";
 import { copyToClipboard } from "@/shared/utils/clipboard";
@@ -314,17 +315,15 @@ function ConversationsPageContent() {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    const poll = () =>
+  // Initial fetch + ongoing cadence: usePolling fires its first tick
+  // immediately, so no separate mount effect is needed.
+  usePolling(
+    () =>
       activeConversationId
         ? loadActiveConversationSummary(activeConversationId)
-        : loadConversations();
-    poll();
-    const interval = setInterval(poll, pollSeconds * 1000);
-    return () => {
-      clearInterval(interval);
-    };
-  }, [pollSeconds, loadConversations, loadActiveConversationSummary, activeConversationId]);
+        : loadConversations(),
+    pollSeconds * 1000
+  );
 
   // activeConversation is a snapshot taken once at openConversation() time —
   // it's never touched again while the modal stays open (the turns-poll

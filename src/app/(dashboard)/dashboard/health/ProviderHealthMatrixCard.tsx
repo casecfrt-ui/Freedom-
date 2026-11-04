@@ -1,7 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
+
+import { usePolling } from "@/hooks/usePolling";
 
 import Badge from "@/shared/components/Badge";
 import { Card } from "@/shared/components";
@@ -299,13 +301,9 @@ export default function ProviderHealthMatrixCard() {
     }
   }, [onlyIssues, providerFilter, range]);
 
-  useEffect(() => {
-    void (async () => {
-      await fetchMatrix();
-    })();
-    const id = setInterval(fetchMatrix, 30000);
-    return () => clearInterval(id);
-  }, [fetchMatrix]);
+  // Initial fetch + ongoing cadence: usePolling fires its first tick
+  // immediately, so no separate mount effect is needed.
+  usePolling(fetchMatrix, 30000);
 
   const providers = useMemo(() => data?.providers ?? [], [data?.providers]);
   const providerOptions = useMemo(() => providers.map((entry) => entry.provider), [providers]);

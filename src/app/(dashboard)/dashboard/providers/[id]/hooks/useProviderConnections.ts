@@ -107,23 +107,43 @@ async function loadProxyConfigData(): Promise<{ config: any } | null> {
   }
 }
 
+/** Effective proxy resolution for one connection, as returned by the batch endpoint. */
+interface ResolvedProxyEntry {
+  proxy: { [key: string]: unknown } | null;
+  level: string;
+}
+
 async function resolveConnectionProxies(
   conns: { id?: string }[]
-): Promise<Record<string, { proxy: any; level: string } | null> | null> {
+): Promise<Record<string, ResolvedProxyEntry | null> | null> {
   try {
-    const results = await Promise.all(
-      conns
-        .filter((c) => c.id)
-        .map((c) =>
-          fetch(`/api/settings/proxy?resolve=${encodeURIComponent(c.id!)}`, { cache: "no-store" })
-            .then((r) => (r.ok ? r.json() : null))
-            .then((data) => [c.id!, data] as [string, any])
-            .catch(() => [c.id!, null] as [string, any])
-        )
-    );
-    const map: Record<string, { proxy: any; level: string } | null> = {};
-    for (const [id, data] of results) {
-      map[id] = data?.proxy ? data : null;
+    // Single batched request instead of one HTTP call per connection: with
+    // many connections the per-connection burst slowed the dashboard and the
+    // shared proxy process.
+    const ids = conns
+      .map((c) => c.id)
+      .filter((cid): cid is string => Boolean(cid))
+      .slice(0, 200);
+    if (ids.length === 0) return {};
+    const res = await fetch(`/api/settings/proxy?resolveIds=${encodeURIComponent(ids.join(","))}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    if (data === null || typeof data !== "object" || !("results" in data)) {
+      return null;
+    }
+    const results: unknown = data.results;
+    if (results === null || typeof results !== "object") return null;
+    const resultsMap = results as Record<string, unknown>; // record keyed by connection id
+    const map: Record<string, ResolvedProxyEntry | null> = {};
+    for (const cid of ids) {
+      const entry: unknown = resultsMap[cid];
+      if (entry !== null && typeof entry === "object" && "proxy" in entry && entry.proxy) {
+        map[cid] = entry as ResolvedProxyEntry; // proxy truthiness checked above
+      } else {
+        map[cid] = null;
+      }
     }
     return map;
   } catch {

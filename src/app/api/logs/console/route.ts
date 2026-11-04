@@ -11,11 +11,12 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
+import { existsSync } from "fs";
 import { getAppLogFilePath } from "@/lib/logEnv";
 import { requireManagementAuth } from "@/lib/api/requireManagementAuth";
 import { matchesSearch } from "@/shared/utils/turkishText";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
+import { readTailLines } from "@/lib/logs/tailNdjson";
 
 const LEVEL_ORDER: Record<string, number> = {
   trace: 5,
@@ -80,8 +81,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json([], { status: 200 });
     }
 
-    const raw = readFileSync(logPath, "utf-8");
-    const lines = raw.trim().split("\n").filter(Boolean);
+    // Read only the tail of the log (bounded, async) instead of the whole file:
+    // the log grows unboundedly during a session and a synchronous full read
+    // blocked the event loop shared with the LLM proxy.
+    // Fetch up to `limit` recent lines plus margin for filtered-out entries.
+    const tailLines = await readTailLines(logPath, Math.min(limit * 4, 8000), {
+      chunkBytes: 256 * 1024,
+    });
+    const lines = tailLines;
 
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const minLevel = LEVEL_ORDER[levelFilter] || 0;

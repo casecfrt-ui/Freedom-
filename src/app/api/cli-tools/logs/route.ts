@@ -22,10 +22,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, existsSync } from "fs";
+import { existsSync } from "fs";
 import { getAppLogFilePath } from "@/lib/logEnv";
 import { requireCliToolsAuth } from "@/lib/api/requireCliToolsAuth";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error.ts";
+import { readTailLines } from "@/lib/logs/tailNdjson";
 
 // Map pino numeric levels to string levels
 const NUMERIC_LEVEL_MAP: Record<number, string> = {
@@ -89,8 +90,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json([], { status: 200 });
     }
 
-    const raw = readFileSync(logPath, "utf-8");
-    const lines = raw.trim().split("\n").filter(Boolean);
+    // Read only the tail of the log (bounded, async) instead of the whole file:
+    // the log grows unboundedly during a session and a synchronous full read
+    // blocked the event loop shared with the LLM proxy.
+    // Fetch up to `limit` recent lines plus margin for filtered-out entries.
+    const lines = await readTailLines(logPath, Math.min(limit * 4, 8000), {
+      chunkBytes: 256 * 1024,
+    });
 
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     const entries: Record<string, unknown>[] = [];

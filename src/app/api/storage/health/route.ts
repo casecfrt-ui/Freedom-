@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import path from "path";
-import fs from "fs";
+import { promises as fsp } from "fs";
 import { resolveDataDir } from "@/lib/dataPaths";
 import {
   getAppLogRetentionDays,
@@ -21,32 +21,28 @@ export async function GET() {
     const dbFilePath = path.join(dataDir, "storage.sqlite");
     const backupsDir = path.join(dataDir, "db_backups");
 
-    // Get DB file size
+    // Get DB file size — async fs: this endpoint is polled by the dashboard
+    // every 15s and sync fs calls here blocked the shared event loop.
     let sizeBytes = 0;
     try {
-      if (fs.existsSync(dbFilePath)) {
-        const stat = fs.statSync(dbFilePath);
-        sizeBytes = stat.size;
-      }
+      const stat = await fsp.stat(dbFilePath);
+      sizeBytes = stat.size;
     } catch {
       /* ignore */
     }
 
     // Get last backup info
-    let lastBackupAt = null;
+    let lastBackupAt: string | null = null;
     let backupCount = 0;
     try {
-      if (fs.existsSync(backupsDir)) {
-        const files = fs
-          .readdirSync(backupsDir)
-          .filter((f) => f.startsWith("db_") && f.endsWith(".sqlite"))
-          .sort()
-          .reverse();
-        backupCount = files.length;
-        if (files.length > 0) {
-          const latestStat = fs.statSync(path.join(backupsDir, files[0]));
-          lastBackupAt = latestStat.mtime.toISOString();
-        }
+      const files = (await fsp.readdir(backupsDir))
+        .filter((f) => f.startsWith("db_") && f.endsWith(".sqlite"))
+        .sort()
+        .reverse();
+      backupCount = files.length;
+      if (files.length > 0) {
+        const latestStat = await fsp.stat(path.join(backupsDir, files[0]));
+        lastBackupAt = latestStat.mtime.toISOString();
       }
     } catch {
       /* ignore */

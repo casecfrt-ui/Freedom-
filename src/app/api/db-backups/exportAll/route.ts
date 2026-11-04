@@ -3,11 +3,16 @@ import { getDbInstance, SQLITE_FILE } from "@/lib/db/core";
 import { exportAllSummaryRows } from "@/lib/db/backup";
 import { CALL_LOGS_DIR } from "@/lib/usage/callLogArtifacts";
 import fs from "fs";
+import { createReadStream } from "fs";
+import { Readable } from "stream";
 import path from "path";
 import os from "os";
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { isAuthenticated } from "@/shared/utils/apiAuth";
 import { sanitizeErrorMessage } from "@omniroute/open-sse/utils/error";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * GET /api/db-backups/exportAll
@@ -76,23 +81,40 @@ export async function GET(request: NextRequest) {
       // Create ZIP using tar (available on all Linux/macOS, and the archiver npm package is not installed)
       // We'll use Node.js built-in zlib to create a simple tar.gz instead
       const tarPath = zipPath.replace(".zip", ".tar.gz");
-      execFileSync("tar", ["-czf", tarPath, "-C", path.dirname(tempDir), path.basename(tempDir)], {
-        timeout: 30000,
+      // Async exec: execFileSync blocked the shared event loop for up to
+      // timeout (30s) while tar compressed the whole data dir, freezing the
+      // LLM proxy and the web UI.
+      await execFileAsync(
+        "tar",
+        ["-czf", tarPath, "-C", path.dirname(tempDir), path.basename(tempDir)],
+        {
+          timeout: 30000,
+        }
+      );
+
+      // tempDir is no longer needed once the tar finishes; clean up without
+      // blocking the loop.
+      fs.rm(tempDir, { recursive: true, force: true }, () => {});
+
+      // Get size for Content-Length without loading the archive into memory.
+      const tarStat = await fs.promises.stat(tarPath);
+
+      // Stream the archive instead of readFileSync: a full read held the
+      // entire (possibly multi-GB) archive in the heap and blocked the loop.
+      const archiveStream = createReadStream(tarPath);
+      const archiveWebStream = Readable.toWeb(archiveStream) as ReadableStream<Uint8Array>;
+
+      // Cleanup runs after the response finishes streaming.
+      archiveStream.on("close", () => {
+        fs.unlink(tarPath, () => {});
       });
 
-      // Read the archive
-      const archiveBuffer = fs.readFileSync(tarPath);
-
-      // Cleanup
-      fs.rmSync(tempDir, { recursive: true, force: true });
-      fs.unlinkSync(tarPath);
-
-      return new NextResponse(archiveBuffer, {
+      return new NextResponse(archiveWebStream, {
         status: 200,
         headers: {
           "Content-Type": "application/gzip",
           "Content-Disposition": `attachment; filename="omniroute-full-backup-${timestamp}.tar.gz"`,
-          "Content-Length": archiveBuffer.length.toString(),
+          "Content-Length": tarStat.size.toString(),
         },
       });
     } catch (innerError) {

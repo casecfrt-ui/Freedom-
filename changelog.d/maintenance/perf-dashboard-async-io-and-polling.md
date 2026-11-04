@@ -1,0 +1,1 @@
+- **perf(dashboard):** async/bounded I/O on dashboard API routes and visibility-aware polling — full-file `readFileSync` log reads, `execFileSync`/`readFileSync` backup export and sync fs health scans no longer block the shared event loop; dashboard polling pauses when the tab is hidden and provider proxy resolution is batched into one request

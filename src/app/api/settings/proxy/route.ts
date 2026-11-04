@@ -157,6 +157,10 @@ function normalizeProxyPayload(body: UpdateProxyConfigInput): UpdateProxyConfigI
  * GET /api/settings/proxy — get proxy configuration
  * Optional query params: ?level=global|provider|combo|key&id=xxx
  * Or: ?resolve=connectionId to resolve effective proxy
+ * Or: ?resolveIds=id1,id2,... to resolve effective proxies in one request
+ *   (the dashboard used to fire one HTTP request per connection here; with
+ *   many connections that burst slowed both the UI and the shared proxy
+ *   process, so batching collapses it into a single round trip).
  */
 export async function GET(request: Request) {
   const authError = await requireManagementAuth(request);
@@ -167,6 +171,31 @@ export async function GET(request: Request) {
     const level = searchParams.get("level");
     const id = searchParams.get("id");
     const resolveId = searchParams.get("resolve");
+    const resolveIdsRaw = searchParams.get("resolveIds");
+
+    // Resolve effective proxies for many connections in one request
+    if (resolveIdsRaw) {
+      const ids = resolveIdsRaw
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean)
+        .slice(0, 200);
+      const entries = await Promise.all(
+        ids.map(async (cid) => {
+          try {
+            const result = await resolveProxyForConnection(cid);
+            return [cid, result] as const;
+          } catch {
+            return [cid, null] as const;
+          }
+        })
+      );
+      const map: Record<string, unknown> = {};
+      for (const [cid, result] of entries) {
+        map[cid] = result?.proxy ? result : null;
+      }
+      return Response.json({ results: map });
+    }
 
     // Resolve effective proxy for a connection
     if (resolveId) {

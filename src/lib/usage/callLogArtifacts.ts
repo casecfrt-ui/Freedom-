@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { promises as fsp } from "node:fs";
 import path from "node:path";
 import type { RequestPipelinePayloads } from "@omniroute/open-sse/utils/requestLogger.ts";
 import { resolveDataDir } from "../dataPaths";
@@ -227,7 +228,9 @@ function buildSizeLimitStages(artifact: CallLogArtifact): Array<() => unknown> {
   const omitBodies = <T extends object>(value: T, keepResponse = false) => ({
     ...value,
     requestBody: OMITTED_FOR_SIZE_LIMIT,
-    responseBody: keepResponse ? (value as { responseBody: unknown }).responseBody : OMITTED_FOR_SIZE_LIMIT,
+    responseBody: keepResponse
+      ? (value as { responseBody: unknown }).responseBody
+      : OMITTED_FOR_SIZE_LIMIT,
     error: preserveErrorForSizeLimit(artifact.error),
   });
 
@@ -383,34 +386,62 @@ export function cleanupEmptyCallLogDirs(baseDir = CALL_LOGS_DIR) {
   }
 }
 
-export function listCallLogArtifactFiles(baseDir = CALL_LOGS_DIR) {
-  if (!baseDir || !fs.existsSync(baseDir)) return [];
+/** One artifact file discovered under the call-logs directory. */
+export interface CallLogArtifactFile {
+  relativePath: string;
+  absPath: string;
+  mtimeMs: number;
+}
 
-  return fs
-    .readdirSync(baseDir)
-    .flatMap((entry) => {
-      const entryPath = path.join(baseDir, entry);
+/**
+ * Scan the call-logs directory for artifact JSON files, newest first.
+ *
+ * Async and bounded: the artifacts directory grows with every logged call,
+ * and the previous synchronous full scan (readdirSync/statSync per file)
+ * froze the shared event loop when invoked from API routes on large dirs.
+ */
+export async function listCallLogArtifactFiles(
+  baseDir = CALL_LOGS_DIR,
+  opts?: { maxFiles?: number }
+): Promise<CallLogArtifactFile[]> {
+  const maxFiles = opts?.maxFiles ?? 50_000;
+  if (!baseDir) return [];
+
+  let topEntries: string[];
+  try {
+    topEntries = await fsp.readdir(baseDir);
+  } catch {
+    return [];
+  }
+
+  const out: CallLogArtifactFile[] = [];
+  for (const entry of topEntries) {
+    const entryPath = path.join(baseDir, entry);
+    let subEntries: string[];
+    try {
+      const stat = await fsp.stat(entryPath);
+      if (!stat.isDirectory()) continue;
+      subEntries = await fsp.readdir(entryPath);
+    } catch {
+      continue;
+    }
+    for (const file of subEntries) {
+      if (!file.endsWith(".json")) continue;
+      const absPath = path.join(entryPath, file);
       try {
-        const stat = fs.statSync(entryPath);
-        if (!stat.isDirectory()) return [];
-
-        return fs
-          .readdirSync(entryPath)
-          .filter((file) => file.endsWith(".json"))
-          .map((file) => {
-            const absPath = path.join(entryPath, file);
-            const fileStat = fs.statSync(absPath);
-            return {
-              relativePath: path.posix.join(entry, file),
-              absPath,
-              mtimeMs: fileStat.mtimeMs,
-            };
-          });
+        const fileStat = await fsp.stat(absPath);
+        out.push({
+          relativePath: path.posix.join(entry, file),
+          absPath,
+          mtimeMs: fileStat.mtimeMs,
+        });
+        if (out.length >= maxFiles) return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
       } catch {
-        return [];
+        continue;
       }
-    })
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    }
+  }
+  return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 export function purgeCallLogArtifactDirectory(
@@ -420,7 +451,7 @@ export function purgeCallLogArtifactDirectory(
   if (!baseDir || !fs.existsSync(baseDir)) return result;
 
   try {
-    result.deletedArtifacts = listCallLogArtifactFiles(baseDir).length;
+    result.deletedArtifacts = countCallLogArtifactFilesSync(baseDir);
   } catch {
     result.deletedArtifacts = 0;
   }
@@ -435,3 +466,28 @@ export function purgeCallLogArtifactDirectory(
 
   return result;
 }
+
+/**
+ * Count artifact files synchronously with a hard cap. Only used by
+ * purgeCallLogArtifactDirectory, which runs right before rmSync of the whole
+ * directory — the recursive walk here is bounded so a huge artifacts dir
+ * cannot stall the loop indefinitely.
+ */
+function countCallLogArtifactFilesSync(baseDir: string): number {
+  let count = 0;
+  for (const entry of fs.readdirSync(baseDir)) {
+    const entryPath = path.join(baseDir, entry);
+    try {
+      if (!fs.statSync(entryPath).isDirectory()) continue;
+      for (const file of fs.readdirSync(entryPath)) {
+        if (file.endsWith(".json")) count++;
+        if (count >= PURGE_COUNT_CAP) return count;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return count;
+}
+
+const PURGE_COUNT_CAP = 100_000;

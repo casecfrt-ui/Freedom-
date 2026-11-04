@@ -1,0 +1,3 @@
+Migrations whose ledger row duplicated another migration's name now release that version slot instead of shadowing the file that belongs there.
+
+A renumbering can leave the ledger holding the previous arrangement, with two versions claiming the same migration name. Only one of them has a matching file, and the other occupies a slot the current file needs, so the runner treats the migration as already applied and skips it. `rehomeLegacyVersionSlotMigrations` already handled this for the slots it was told about; the seven pairs reported in #18952 are now declared too. On a database carrying those duplicates this restores `radar_referrals_cache` and the two `proxy_subscriptions` columns that had never been created.
